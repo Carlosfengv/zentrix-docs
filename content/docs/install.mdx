@@ -1,0 +1,658 @@
+---
+title: 单机生产版安装
+description: 面向第一次安装用户的 Zentrix 镜像制品包安装步骤
+---
+
+# Zentrix 单机生产版安装手册
+
+这份手册面向第一次安装 Zentrix 的用户。你只需要准备一台 Linux 服务器和一个安装包，按步骤执行即可。
+
+本文适用于这种安装方式：
+
+- 安装在一台服务器上。
+- 使用交付的镜像制品包安装。
+- 不需要下载源码。
+- 不需要安装 Rust、Node.js、pnpm。
+- 不需要自己构建镜像。
+
+## 1. 你会拿到什么文件
+
+交付时通常会给你两个文件：
+
+```text
+lobsterpool-offline-amd64-版本号.tar.gz
+lobsterpool-offline-amd64-版本号.tar.gz.sha256
+```
+
+第一个是安装包，第二个是校验文件，用来确认安装包没有损坏。
+
+安装包里面已经包含：
+
+- Zentrix 服务镜像。
+- 数据库、缓存、权限服务等依赖镜像。
+- 前端页面文件。
+- 安装脚本 `install.sh`。
+- 配置模板 `install.conf.example`。
+
+## 2. 安装前准备
+
+### 2.1 服务器要求
+
+建议使用一台干净的 Linux 服务器。
+
+| 项目 | 要求 |
+| --- | --- |
+| 系统 | Ubuntu 22.04/24.04、Debian 12、RHEL 9 或类似 Linux |
+| CPU | 最少 4 核，推荐 8 核以上 |
+| 内存 | 最少 16 GB，推荐 32 GB |
+| 磁盘 | 最少 100 GB 可用空间 |
+| 架构 | x86_64 / amd64 |
+| Docker | 20.10 或更高 |
+| Docker Compose | V2，命令是 `docker compose` |
+
+### 2.2 需要空闲的端口
+
+安装前请确保这些端口没有被其他程序占用：
+
+```text
+80, 443, 3000, 5432, 6379, 8443, 9000
+```
+
+如果不确定，可以在服务器上执行：
+
+```bash
+ss -tlnp | grep -E ':(80|443|3000|5432|6379|8443|9000)\b' || true
+```
+
+没有输出通常表示这些端口没有被占用。
+
+### 2.3 检查 Docker
+
+在服务器上执行：
+
+```bash
+docker version
+docker compose version
+docker ps
+```
+
+如果这些命令都能正常输出，说明 Docker 基本可用。
+
+如果提示没有权限，可以尝试使用 `sudo`：
+
+```bash
+sudo docker ps
+```
+
+后续安装命令默认使用 `sudo` 执行。
+
+## 3. 上传安装包
+
+在你的电脑上，把安装包上传到服务器：
+
+```bash
+scp lobsterpool-offline-amd64-版本号.tar.gz* 用户名@服务器IP:/tmp/
+```
+
+示例：
+
+```bash
+scp lobsterpool-offline-amd64-1.0.0.tar.gz* admin@192.168.1.10:/tmp/
+```
+
+然后登录服务器：
+
+```bash
+ssh 用户名@服务器IP
+```
+
+示例：
+
+```bash
+ssh admin@192.168.1.10
+```
+
+## 4. 校验安装包
+
+进入 `/tmp`：
+
+```bash
+cd /tmp
+```
+
+执行校验：
+
+```bash
+sha256sum -c lobsterpool-offline-amd64-版本号.tar.gz.sha256
+```
+
+示例：
+
+```bash
+sha256sum -c lobsterpool-offline-amd64-1.0.0.tar.gz.sha256
+```
+
+看到类似下面的输出就表示安装包没有损坏：
+
+```text
+lobsterpool-offline-amd64-1.0.0.tar.gz: OK
+```
+
+## 5. 解压安装包
+
+创建临时安装目录：
+
+```bash
+sudo rm -rf /opt/lobsterpool-stage
+sudo mkdir -p /opt/lobsterpool-stage
+```
+
+解压：
+
+```bash
+sudo tar xzf /tmp/lobsterpool-offline-amd64-版本号.tar.gz -C /opt/lobsterpool-stage
+```
+
+示例：
+
+```bash
+sudo tar xzf /tmp/lobsterpool-offline-amd64-1.0.0.tar.gz -C /opt/lobsterpool-stage
+```
+
+进入目录：
+
+```bash
+cd /opt/lobsterpool-stage
+```
+
+查看文件：
+
+```bash
+ls
+```
+
+你应该能看到：
+
+```text
+docker-compose.yml
+images
+install.conf.example
+install.sh
+manifest.json
+runtime
+```
+
+## 6. 填写安装配置
+
+复制配置模板：
+
+```bash
+sudo cp install.conf.example install.conf
+```
+
+编辑配置：
+
+```bash
+sudo vi install.conf
+```
+
+如果你不熟悉 `vi`，也可以使用服务器上已有的编辑器，例如：
+
+```bash
+sudo nano install.conf
+```
+
+### 6.1 必须填写的配置
+
+找到下面两项并填写：
+
+```bash
+PUBLIC_URL=
+DB_PASS=
+```
+
+填写示例：
+
+```bash
+PUBLIC_URL=https://ai.example.com
+DB_PASS=请换成一个很强的数据库密码
+```
+
+说明：
+
+- `PUBLIC_URL` 是用户访问 Zentrix 的地址。
+- 如果你已经有域名和 HTTPS，填写 `https://你的域名`。
+- 如果只是内网试用，可以先填 `http://服务器IP`，例如 `http://192.168.1.10`。
+- `DB_PASS` 是数据库密码，请不要使用简单密码。
+
+### 6.2 推荐填写的模型配置
+
+如果你希望安装完成后能直接使用 AI 功能，建议同时填写：
+
+```bash
+FACTORY_PROVIDER_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+FACTORY_PROVIDER_KEY=你的模型服务商APIKey
+FACTORY_PROVIDER_MODEL=qwen3.5-plus
+```
+
+如果你使用其他 OpenAI 兼容服务，把 `FACTORY_PROVIDER_URL` 和 `FACTORY_PROVIDER_MODEL` 改成对应值。
+
+### 6.3 可以先不填的配置
+
+这些密钥可以留空，安装脚本会自动生成：
+
+```bash
+JWT_SECRET=
+LOBSTERPOOL_MASTER_KEY=
+SPICEDB_TOKEN=
+RUSTFS_SECRET_KEY=
+PLATFORM_ADMIN_KEY=
+```
+
+安装完成后，它们会写入：
+
+```text
+/opt/lobsterpool/.env
+```
+
+请妥善备份这个文件，尤其是 `LOBSTERPOOL_MASTER_KEY`。这个密钥丢失后，平台里已经加密保存的密钥和凭证无法恢复。
+
+### 6.4 如果服务器需要代理上网
+
+如果服务器或容器必须通过代理访问模型服务商，可以在 `install.conf` 中填写：
+
+```bash
+HTTP_PROXY=http://代理地址:端口
+HTTPS_PROXY=http://代理地址:端口
+EGRESS_UPSTREAM_PROXY=http://代理地址:端口
+```
+
+如果没有代理要求，可以不填。
+
+## 7. 开始安装
+
+确认当前目录是：
+
+```bash
+pwd
+```
+
+应该输出：
+
+```text
+/opt/lobsterpool-stage
+```
+
+执行安装：
+
+```bash
+sudo bash install.sh
+```
+
+安装过程会自动完成：
+
+1. 检查服务器环境。
+2. 导入安装包里的 Docker 镜像。
+3. 生成生产环境配置。
+4. 创建安装目录 `/opt/lobsterpool`。
+5. 启动数据库、缓存、权限服务、对象存储、Zentrix 主服务和前端入口。
+6. 自动执行初始化和数据库迁移。
+7. 检查服务是否启动成功。
+
+第一次安装可能需要几分钟，请耐心等待。
+
+看到类似下面的提示表示安装完成：
+
+```text
+Deployment complete
+Access LobsterPool at: http://服务器IP
+```
+
+或者：
+
+```text
+Deployment complete
+Access LobsterPool at: https://你的域名
+```
+
+## 8. 检查是否安装成功
+
+进入正式安装目录：
+
+```bash
+cd /opt/lobsterpool
+```
+
+查看容器状态：
+
+```bash
+sudo docker compose ps
+```
+
+检查 API：
+
+```bash
+curl -s http://localhost:3000/health
+```
+
+看到下面输出表示 API 正常：
+
+```json
+{"status":"ok"}
+```
+
+检查版本：
+
+```bash
+curl -s http://localhost:3000/api/v1/version
+```
+
+检查网页入口：
+
+```bash
+curl -I http://localhost
+```
+
+如果你配置的是 HTTPS 域名：
+
+```bash
+curl -I https://你的域名
+```
+
+## 9. 打开页面并完成初始化
+
+用浏览器打开你在 `PUBLIC_URL` 填写的地址。
+
+例如：
+
+```text
+http://192.168.1.10
+```
+
+或：
+
+```text
+https://ai.example.com
+```
+
+第一次打开时，按照页面提示创建第一个管理员账号。
+
+创建完成后，建议做一次简单验证：
+
+1. 登录控制台。
+2. 检查模型或 provider 配置是否可用。
+3. 创建一个 Agent。
+4. 启动 Agent。
+5. 给 Agent 发一条测试消息。
+
+如果 Agent 能回复，说明平台和模型调用基本正常。
+
+## 10. 常用管理命令
+
+以后日常操作都在这个目录执行：
+
+```bash
+cd /opt/lobsterpool
+```
+
+查看服务状态：
+
+```bash
+sudo docker compose ps
+```
+
+查看全部日志：
+
+```bash
+sudo docker compose logs -f
+```
+
+查看主服务日志：
+
+```bash
+sudo docker compose logs -f lobsterpool
+```
+
+重启主服务：
+
+```bash
+sudo docker compose restart lobsterpool
+```
+
+重启全部服务：
+
+```bash
+sudo docker compose restart
+```
+
+停止全部服务：
+
+```bash
+sudo docker compose down
+```
+
+启动全部服务：
+
+```bash
+sudo docker compose up -d
+```
+
+查看当前部署版本：
+
+```bash
+python3 -m json.tool /opt/lobsterpool/manifest.json
+```
+
+## 11. 重要文件说明
+
+| 文件或目录 | 说明 |
+| --- | --- |
+| `/opt/zentrix/.env` | 生产配置和密钥，必须保护和备份 |
+| `/opt/zentrix/manifest.json` | 当前安装版本和镜像信息 |
+| `/opt/zentrix/install-state.json` | 最近一次安装或升级状态 |
+| `/opt/zentrix/bootstrap-status.json` | 初始化容器状态 |
+| `/opt/zentrix/backups/` | 升级前自动备份 |
+| `/var/lib/zentrix/contexts` | Agent 工作空间目录 |
+
+最重要的是：
+
+```text
+/opt/lobsterpool/.env
+```
+
+请不要随意删除，也不要发给无关人员。
+
+## 12. 升级
+
+升级时，你会拿到一个新的安装包：
+
+```text
+lobsterpool-offline-amd64-新版本.tar.gz
+lobsterpool-offline-amd64-新版本.tar.gz.sha256
+```
+
+上传、校验、解压：
+
+```bash
+scp lobsterpool-offline-amd64-新版本.tar.gz* 用户名@服务器IP:/tmp/
+ssh 用户名@服务器IP
+
+cd /tmp
+sha256sum -c lobsterpool-offline-amd64-新版本.tar.gz.sha256
+
+sudo rm -rf /opt/lobsterpool-stage-new
+sudo mkdir -p /opt/lobsterpool-stage-new
+sudo tar xzf /tmp/lobsterpool-offline-amd64-新版本.tar.gz -C /opt/lobsterpool-stage-new
+cd /opt/lobsterpool-stage-new
+```
+
+复制并填写配置：
+
+```bash
+sudo cp install.conf.example install.conf
+sudo vi install.conf
+```
+
+请确保这几项和旧环境一致：
+
+```bash
+PUBLIC_URL=原来的访问地址
+DB_PASS=原来的数据库密码
+INSTALL_DIR=/opt/lobsterpool
+BACKUP_DIR=/opt/lobsterpool/backups
+```
+
+执行升级：
+
+```bash
+sudo bash install.sh
+```
+
+升级脚本会自动备份旧数据和旧镜像，再启动新版本。
+
+升级完成后检查：
+
+```bash
+cd /opt/lobsterpool
+sudo docker compose ps
+curl -s http://localhost:3000/health
+curl -s http://localhost:3000/api/v1/version
+```
+
+## 13. 回滚
+
+如果升级后发现问题，可以回滚到升级前的版本。
+
+进入新版安装包解压目录：
+
+```bash
+cd /opt/lobsterpool-stage-new
+```
+
+执行：
+
+```bash
+sudo bash install.sh rollback
+```
+
+回滚完成后检查：
+
+```bash
+cd /opt/lobsterpool
+sudo docker compose ps
+curl -s http://localhost:3000/health
+curl -s http://localhost:3000/api/v1/version
+```
+
+回滚依赖升级时自动生成的备份目录：
+
+```text
+/opt/lobsterpool/backups/
+```
+
+## 14. 常见问题
+
+### 14.1 安装提示端口被占用
+
+现象：
+
+```text
+Ports already in use
+```
+
+检查占用：
+
+```bash
+ss -tlnp | grep -E ':(80|443|3000|5432|6379|8443|9000)\b'
+```
+
+处理方式：
+
+- 停掉占用端口的旧服务。
+- 或换一台干净服务器安装。
+
+### 14.2 `curl http://localhost:3000/health` 没有返回 ok
+
+先看容器状态：
+
+```bash
+cd /opt/lobsterpool
+sudo docker compose ps
+```
+
+再看日志：
+
+```bash
+sudo docker compose logs lobsterpool
+sudo docker compose logs postgres
+sudo docker compose logs lobsterpool-migrate
+```
+
+### 14.3 页面打不开
+
+先在服务器本机检查：
+
+```bash
+curl -I http://localhost
+curl -s http://localhost:3000/health
+```
+
+如果本机正常，但外部打不开，通常是：
+
+- 服务器防火墙没有放行 `80/443`。
+- 云服务器安全组没有放行 `80/443`。
+- 域名没有正确解析到服务器 IP。
+- `PUBLIC_URL` 填错。
+
+### 14.4 Agent 启动失败
+
+查看主服务日志：
+
+```bash
+cd /opt/lobsterpool
+sudo docker compose logs lobsterpool
+```
+
+检查运行时镜像是否存在：
+
+```bash
+sudo docker images | grep -E 'openclaw|ironclaw|opencode'
+```
+
+### 14.5 模型调用失败
+
+检查配置：
+
+```bash
+cd /opt/lobsterpool
+grep -E 'FACTORY_PROVIDER|OPENAI|ANTHROPIC|DASHSCOPE|HTTP_PROXY|EGRESS' .env
+```
+
+查看日志：
+
+```bash
+sudo docker compose logs tensorzero
+sudo docker compose logs lobsterpool
+```
+
+常见原因：
+
+- API Key 填错。
+- 模型名称填错。
+- 服务器无法访问模型服务商。
+- 需要代理但没有配置代理。
+
+## 15. 安装完成后的检查清单
+
+安装完成后，请逐项确认：
+
+- [ ] 浏览器能打开 `PUBLIC_URL`。
+- [ ] 已创建第一个管理员账号。
+- [ ] `curl -s http://localhost:3000/health` 返回 `{"status":"ok"}`。
+- [ ] `sudo docker compose ps` 没有明显失败的服务。
+- [ ] `/opt/zentrix/.env` 已备份并限制访问权限。
+- [ ] `LOBSTERPOOL_MASTER_KEY` 已安全备份。
+- [ ] 已确认模型 provider 配置可用。
+- [ ] 已创建并启动一个测试 Agent。
+- [ ] 如果是公网使用，服务器防火墙或安全组已放行 `80/443`。
+- [ ] 已规划数据库和对象存储的数据备份。

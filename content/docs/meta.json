@@ -1,0 +1,18 @@
+{
+  "title": "Zentrix 使用指南",
+  "pages": [
+    "index",
+    "---安装部署---",
+    "install",
+    "---智能体装配---",
+    "create-agent",
+    "models-and-chat",
+    "connect-apps",
+    "channel-integration",
+    "add-skills",
+    "inspiration",
+    "agent-management",
+    "---基础设施---",
+    "model-provider-management"
+  ]
+}

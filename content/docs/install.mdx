@@ -1,21 +1,22 @@
 ---
 title: 单机生产版安装
-description: 面向第一次安装用户的 Zentrix 镜像制品包安装步骤
+description: 面向第一次安装用户的 Zentrix 镜像制品包安装、升级和回滚步骤
 ---
 
 # Zentrix 单机生产版安装手册
 
-这份手册面向第一次安装 Zentrix 的用户。你只需要准备一台 Linux 服务器和一个安装包，按步骤执行即可。
+这份手册面向第一次安装 Zentrix 的用户。你只需要准备一台 Linux 服务器和一个交付安装包，按步骤执行即可。
 
-本文适用于这种安装方式：
+本文参考离线交付包安装流程整理，适用于：
 
 - 安装在一台服务器上。
-- 使用交付的镜像制品包安装。
+- 使用镜像制品包安装。
+- 客户现场可以没有外网。
 - 不需要下载源码。
 - 不需要安装 Rust、Node.js、pnpm。
-- 不需要自己构建镜像。
+- 不需要自己构建 Docker 镜像。
 
-## 1. 你会拿到什么文件
+## 1. 先理解安装包是什么
 
 交付时通常会给你两个文件：
 
@@ -26,13 +27,26 @@ lobsterpool-offline-amd64-版本号.tar.gz.sha256
 
 第一个是安装包，第二个是校验文件，用来确认安装包没有损坏。
 
-安装包里面已经包含：
+安装包解压后大致包含：
 
-- Zentrix 服务镜像。
-- 数据库、缓存、权限服务等依赖镜像。
-- 前端页面文件。
-- 安装脚本 `install.sh`。
-- 配置模板 `install.conf.example`。
+```text
+.
+├── images/                 # Docker 镜像文件，安装时会自动导入
+├── runtime/                # 运行时配置、前端页面、Caddy 配置等
+├── docker-compose.yml      # 生产部署用的 Docker Compose 文件
+├── install.sh              # 安装、升级、回滚脚本
+├── install.conf.example    # 安装配置模板
+├── manifest.json           # 版本、镜像清单、校验和
+└── README.md
+```
+
+你通常只需要关心这三个文件：
+
+| 文件 | 用途 |
+| --- | --- |
+| `install.conf.example` | 配置模板，复制成 `install.conf` 后填写 |
+| `install.sh` | 执行安装、升级、回滚 |
+| `manifest.json` | 查看安装包版本和镜像信息 |
 
 ## 2. 安装前准备
 
@@ -40,17 +54,16 @@ lobsterpool-offline-amd64-版本号.tar.gz.sha256
 
 建议使用一台干净的 Linux 服务器。
 
-| 项目 | 要求 |
-| --- | --- |
-| 系统 | Ubuntu 22.04/24.04、Debian 12、RHEL 9 或类似 Linux |
-| CPU | 最少 4 核，推荐 8 核以上 |
-| 内存 | 最少 16 GB，推荐 32 GB |
-| 磁盘 | 最少 100 GB 可用空间 |
-| 架构 | x86_64 / amd64 |
-| Docker | 20.10 或更高 |
-| Docker Compose | V2，命令是 `docker compose` |
+| 项目 | 最低要求 | 建议 |
+| --- | --- | --- |
+| 系统 | Linux x86_64 / amd64 | Ubuntu 22.04/24.04、Debian 12、RHEL 9 |
+| CPU | 4 核 | 8 核以上 |
+| 内存 | 8 GB | 16 GB 以上 |
+| 磁盘 | 10 GB 可用 | 100 GB 以上，生产建议做快照 |
+| Docker | 20.10+ | 越新越好 |
+| Docker Compose | V2 | 命令必须是 `docker compose` |
 
-### 2.2 需要空闲的端口
+### 2.2 必须空闲的端口
 
 安装前请确保这些端口没有被其他程序占用：
 
@@ -58,7 +71,7 @@ lobsterpool-offline-amd64-版本号.tar.gz.sha256
 80, 443, 3000, 5432, 6379, 8443, 9000
 ```
 
-如果不确定，可以在服务器上执行：
+检查命令：
 
 ```bash
 ss -tlnp | grep -E ':(80|443|3000|5432|6379|8443|9000)\b' || true
@@ -66,9 +79,11 @@ ss -tlnp | grep -E ':(80|443|3000|5432|6379|8443|9000)\b' || true
 
 没有输出通常表示这些端口没有被占用。
 
-### 2.3 检查 Docker
+安装器还会使用一些观测端口，例如 `4317`、`4318`、`8888`、`9090`、`3001`。这些端口如果被占用，安装器会自动找下一个空闲端口，不需要你手动处理。
 
-在服务器上执行：
+### 2.3 检查 Docker 是否可用
+
+执行：
 
 ```bash
 docker version
@@ -76,19 +91,17 @@ docker compose version
 docker ps
 ```
 
-如果这些命令都能正常输出，说明 Docker 基本可用。
-
-如果提示没有权限，可以尝试使用 `sudo`：
+如果 `docker ps` 提示权限不足，试试：
 
 ```bash
 sudo docker ps
 ```
 
-后续安装命令默认使用 `sudo` 执行。
+后续安装命令都使用 `sudo` 执行。
 
 ## 3. 上传安装包
 
-在你的电脑上，把安装包上传到服务器：
+在你的电脑上上传安装包：
 
 ```bash
 scp lobsterpool-offline-amd64-版本号.tar.gz* 用户名@服务器IP:/tmp/
@@ -100,7 +113,7 @@ scp lobsterpool-offline-amd64-版本号.tar.gz* 用户名@服务器IP:/tmp/
 scp lobsterpool-offline-amd64-1.0.0.tar.gz* admin@192.168.1.10:/tmp/
 ```
 
-然后登录服务器：
+登录服务器：
 
 ```bash
 ssh 用户名@服务器IP
@@ -132,7 +145,7 @@ sha256sum -c lobsterpool-offline-amd64-版本号.tar.gz.sha256
 sha256sum -c lobsterpool-offline-amd64-1.0.0.tar.gz.sha256
 ```
 
-看到类似下面的输出就表示安装包没有损坏：
+看到 `OK` 就表示安装包没有损坏：
 
 ```text
 lobsterpool-offline-amd64-1.0.0.tar.gz: OK
@@ -165,7 +178,7 @@ sudo tar xzf /tmp/lobsterpool-offline-amd64-1.0.0.tar.gz -C /opt/lobsterpool-sta
 cd /opt/lobsterpool-stage
 ```
 
-查看文件：
+确认文件完整：
 
 ```bash
 ls
@@ -196,38 +209,61 @@ sudo cp install.conf.example install.conf
 sudo vi install.conf
 ```
 
-如果你不熟悉 `vi`，也可以使用服务器上已有的编辑器，例如：
+如果你不熟悉 `vi`，可以使用：
 
 ```bash
 sudo nano install.conf
 ```
 
-### 6.1 必须填写的配置
+### 6.1 必填配置
 
-找到下面两项并填写：
+找到并填写：
 
 ```bash
 PUBLIC_URL=
 DB_PASS=
 ```
 
-填写示例：
+示例一：有域名和 HTTPS：
 
 ```bash
 PUBLIC_URL=https://ai.example.com
 DB_PASS=请换成一个很强的数据库密码
 ```
 
+示例二：内网试用：
+
+```bash
+PUBLIC_URL=http://192.168.1.10
+DB_PASS=请换成一个很强的数据库密码
+```
+
 说明：
 
-- `PUBLIC_URL` 是用户访问 Zentrix 的地址。
-- 如果你已经有域名和 HTTPS，填写 `https://你的域名`。
-- 如果只是内网试用，可以先填 `http://服务器IP`，例如 `http://192.168.1.10`。
-- `DB_PASS` 是数据库密码，请不要使用简单密码。
+- `PUBLIC_URL` 是用户打开 Zentrix 的地址，不要带最后的 `/`。
+- `DB_PASS` 是数据库密码，请不要使用 `123456`、`password` 这类简单密码。
 
-### 6.2 推荐填写的模型配置
+### 6.2 推荐填写的路径
 
-如果你希望安装完成后能直接使用 AI 功能，建议同时填写：
+默认可以不改：
+
+```bash
+INSTALL_DIR=/opt/lobsterpool
+BACKUP_DIR=/opt/lobsterpool/backups
+CONTEXT_HOST_PATH=/var/lib/lobsterpool/contexts
+```
+
+说明：
+
+| 配置 | 说明 |
+| --- | --- |
+| `INSTALL_DIR` | Zentrix 正式安装目录 |
+| `BACKUP_DIR` | 升级前自动备份目录 |
+| `CONTEXT_HOST_PATH` | 智能体工作空间目录 |
+
+### 6.3 推荐填写模型配置
+
+如果安装完成后要直接使用 AI 功能，建议填写：
 
 ```bash
 FACTORY_PROVIDER_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
@@ -235,11 +271,11 @@ FACTORY_PROVIDER_KEY=你的模型服务商APIKey
 FACTORY_PROVIDER_MODEL=qwen3.5-plus
 ```
 
-如果你使用其他 OpenAI 兼容服务，把 `FACTORY_PROVIDER_URL` 和 `FACTORY_PROVIDER_MODEL` 改成对应值。
+如果你使用其他 OpenAI 兼容模型服务，把 URL 和模型名改成对应值。
 
-### 6.3 可以先不填的配置
+### 6.4 可以留空自动生成的密钥
 
-这些密钥可以留空，安装脚本会自动生成：
+这些可以先不填：
 
 ```bash
 JWT_SECRET=
@@ -249,17 +285,17 @@ RUSTFS_SECRET_KEY=
 PLATFORM_ADMIN_KEY=
 ```
 
-安装完成后，它们会写入：
+安装脚本会自动生成，并写入：
 
 ```text
 /opt/lobsterpool/.env
 ```
 
-请妥善备份这个文件，尤其是 `LOBSTERPOOL_MASTER_KEY`。这个密钥丢失后，平台里已经加密保存的密钥和凭证无法恢复。
+请务必备份 `/opt/lobsterpool/.env`，尤其是 `LOBSTERPOOL_MASTER_KEY`。这个密钥丢失后，平台里已经加密保存的密钥和凭证无法恢复。
 
-### 6.4 如果服务器需要代理上网
+### 6.5 如果服务器需要代理上网
 
-如果服务器或容器必须通过代理访问模型服务商，可以在 `install.conf` 中填写：
+如果服务器或容器必须通过代理访问模型服务商，可以填写：
 
 ```bash
 HTTP_PROXY=http://代理地址:端口
@@ -267,11 +303,11 @@ HTTPS_PROXY=http://代理地址:端口
 EGRESS_UPSTREAM_PROXY=http://代理地址:端口
 ```
 
-如果没有代理要求，可以不填。
+没有代理要求就不用填。
 
 ## 7. 开始安装
 
-确认当前目录是：
+确认当前目录：
 
 ```bash
 pwd
@@ -289,30 +325,26 @@ pwd
 sudo bash install.sh
 ```
 
-安装过程会自动完成：
+第一次安装可能需要几分钟。
 
-1. 检查服务器环境。
-2. 导入安装包里的 Docker 镜像。
-3. 生成生产环境配置。
-4. 创建安装目录 `/opt/lobsterpool`。
-5. 启动数据库、缓存、权限服务、对象存储、Zentrix 主服务和前端入口。
-6. 自动执行初始化和数据库迁移。
-7. 检查服务是否启动成功。
+安装脚本会自动做这些事：
 
-第一次安装可能需要几分钟，请耐心等待。
+1. 检查 Docker、Compose、磁盘和端口。
+2. 读取 `install.conf`。
+3. 生成生产 `.env`。
+4. 逐个导入 `images/*.tar` 镜像。
+5. 复制运行文件到 `/opt/lobsterpool`。
+6. 启动基础服务。
+7. 启动 Zentrix 全部服务。
+8. 执行数据库初始化。
+9. 检查一次性初始化容器是否成功。
+10. 检查 `/health`、`/api/v1/version` 和前端页面。
 
 看到类似下面的提示表示安装完成：
 
 ```text
 Deployment complete
-Access LobsterPool at: http://服务器IP
-```
-
-或者：
-
-```text
-Deployment complete
-Access LobsterPool at: https://你的域名
+Access LobsterPool at: http://192.168.1.10
 ```
 
 ## 8. 检查是否安装成功
@@ -323,7 +355,7 @@ Access LobsterPool at: https://你的域名
 cd /opt/lobsterpool
 ```
 
-查看容器状态：
+查看服务状态：
 
 ```bash
 sudo docker compose ps
@@ -335,7 +367,7 @@ sudo docker compose ps
 curl -s http://localhost:3000/health
 ```
 
-看到下面输出表示 API 正常：
+正常结果：
 
 ```json
 {"status":"ok"}
@@ -347,19 +379,28 @@ curl -s http://localhost:3000/health
 curl -s http://localhost:3000/api/v1/version
 ```
 
-检查网页入口：
+检查网页：
 
 ```bash
 curl -I http://localhost
 ```
 
-如果你配置的是 HTTPS 域名：
+如果你配置了 HTTPS 域名：
 
 ```bash
 curl -I https://你的域名
 ```
 
-## 9. 打开页面并完成初始化
+也可以检查安装状态文件：
+
+```bash
+python3 -m json.tool /opt/lobsterpool/install-state.json
+python3 -m json.tool /opt/lobsterpool/bootstrap-status.json
+```
+
+如果 `install-state.json` 里显示 `completed`，说明安装流程完成。
+
+## 9. 浏览器初始化
 
 用浏览器打开你在 `PUBLIC_URL` 填写的地址。
 
@@ -377,19 +418,47 @@ https://ai.example.com
 
 第一次打开时，按照页面提示创建第一个管理员账号。
 
-创建完成后，建议做一次简单验证：
+创建完成后建议做一次测试：
 
 1. 登录控制台。
-2. 检查模型或 provider 配置是否可用。
-3. 创建一个 Agent。
-4. 启动 Agent。
-5. 给 Agent 发一条测试消息。
+2. 检查模型服务是否可用。
+3. 创建一个测试智能体。
+4. 启动智能体。
+5. 发一条测试消息。
 
-如果 Agent 能回复，说明平台和模型调用基本正常。
+智能体能正常回复，说明平台和模型调用基本正常。
 
-## 10. 常用管理命令
+## 10. 安装后目录说明
 
-以后日常操作都在这个目录执行：
+正式安装目录默认是：
+
+```text
+/opt/lobsterpool
+```
+
+常见文件：
+
+| 文件或目录 | 说明 |
+| --- | --- |
+| `/opt/lobsterpool/.env` | 生产配置和密钥，必须保护和备份 |
+| `/opt/lobsterpool/docker-compose.yml` | 服务启动配置 |
+| `/opt/lobsterpool/manifest.json` | 当前安装版本、镜像清单和校验信息 |
+| `/opt/lobsterpool/install-state.json` | 最近一次安装或升级状态 |
+| `/opt/lobsterpool/bootstrap-status.json` | 初始化容器状态 |
+| `/opt/lobsterpool/backups/` | 升级前自动备份 |
+| `/var/lib/lobsterpool/contexts` | 智能体工作空间目录 |
+
+最重要的是：
+
+```text
+/opt/lobsterpool/.env
+```
+
+请不要随意删除，也不要发给无关人员。
+
+## 11. 常用管理命令
+
+进入安装目录：
 
 ```bash
 cd /opt/lobsterpool
@@ -437,34 +506,15 @@ sudo docker compose down
 sudo docker compose up -d
 ```
 
-查看当前部署版本：
+查看当前版本：
 
 ```bash
 python3 -m json.tool /opt/lobsterpool/manifest.json
 ```
 
-## 11. 重要文件说明
-
-| 文件或目录 | 说明 |
-| --- | --- |
-| `/opt/zentrix/.env` | 生产配置和密钥，必须保护和备份 |
-| `/opt/zentrix/manifest.json` | 当前安装版本和镜像信息 |
-| `/opt/zentrix/install-state.json` | 最近一次安装或升级状态 |
-| `/opt/zentrix/bootstrap-status.json` | 初始化容器状态 |
-| `/opt/zentrix/backups/` | 升级前自动备份 |
-| `/var/lib/zentrix/contexts` | Agent 工作空间目录 |
-
-最重要的是：
-
-```text
-/opt/lobsterpool/.env
-```
-
-请不要随意删除，也不要发给无关人员。
-
 ## 12. 升级
 
-升级时，你会拿到一个新的安装包：
+升级时，你会拿到新的安装包：
 
 ```text
 lobsterpool-offline-amd64-新版本.tar.gz
@@ -486,14 +536,14 @@ sudo tar xzf /tmp/lobsterpool-offline-amd64-新版本.tar.gz -C /opt/lobsterpool
 cd /opt/lobsterpool-stage-new
 ```
 
-复制并填写配置：
+准备配置：
 
 ```bash
 sudo cp install.conf.example install.conf
 sudo vi install.conf
 ```
 
-请确保这几项和旧环境一致：
+请确保这些配置和旧环境一致：
 
 ```bash
 PUBLIC_URL=原来的访问地址
@@ -508,9 +558,17 @@ BACKUP_DIR=/opt/lobsterpool/backups
 sudo bash install.sh
 ```
 
-升级脚本会自动备份旧数据和旧镜像，再启动新版本。
+升级脚本会自动：
 
-升级完成后检查：
+1. 读取旧版本。
+2. 备份数据库、配置和旧镜像。
+3. 停止旧服务。
+4. 导入新镜像。
+5. 保留原来的 `.env` 密钥。
+6. 启动新版本。
+7. 做健康检查。
+
+升级后检查：
 
 ```bash
 cd /opt/lobsterpool
@@ -523,19 +581,28 @@ curl -s http://localhost:3000/api/v1/version
 
 如果升级后发现问题，可以回滚到升级前的版本。
 
-进入新版安装包解压目录：
+进入新版安装包目录：
 
 ```bash
 cd /opt/lobsterpool-stage-new
 ```
 
-执行：
+执行回滚：
 
 ```bash
 sudo bash install.sh rollback
 ```
 
-回滚完成后检查：
+回滚会从最近一次备份恢复：
+
+- `.env`
+- `docker-compose.yml`
+- `manifest.json`
+- 旧版本镜像
+- 主数据库
+- 权限数据库
+
+回滚后检查：
 
 ```bash
 cd /opt/lobsterpool
@@ -544,7 +611,7 @@ curl -s http://localhost:3000/health
 curl -s http://localhost:3000/api/v1/version
 ```
 
-回滚依赖升级时自动生成的备份目录：
+备份目录在：
 
 ```text
 /opt/lobsterpool/backups/
@@ -571,21 +638,28 @@ ss -tlnp | grep -E ':(80|443|3000|5432|6379|8443|9000)\b'
 - 停掉占用端口的旧服务。
 - 或换一台干净服务器安装。
 
-### 14.2 `curl http://localhost:3000/health` 没有返回 ok
+### 14.2 健康检查没有返回 ok
 
-先看容器状态：
+检查服务：
 
 ```bash
 cd /opt/lobsterpool
 sudo docker compose ps
 ```
 
-再看日志：
+查看日志：
 
 ```bash
 sudo docker compose logs lobsterpool
 sudo docker compose logs postgres
 sudo docker compose logs lobsterpool-migrate
+```
+
+也可以查看安装状态：
+
+```bash
+python3 -m json.tool /opt/lobsterpool/install-state.json
+python3 -m json.tool /opt/lobsterpool/bootstrap-status.json
 ```
 
 ### 14.3 页面打不开
@@ -597,14 +671,14 @@ curl -I http://localhost
 curl -s http://localhost:3000/health
 ```
 
-如果本机正常，但外部打不开，通常是：
+如果服务器本机正常，但外部打不开，通常是：
 
 - 服务器防火墙没有放行 `80/443`。
 - 云服务器安全组没有放行 `80/443`。
 - 域名没有正确解析到服务器 IP。
 - `PUBLIC_URL` 填错。
 
-### 14.4 Agent 启动失败
+### 14.4 智能体启动失败
 
 查看主服务日志：
 
@@ -613,7 +687,7 @@ cd /opt/lobsterpool
 sudo docker compose logs lobsterpool
 ```
 
-检查运行时镜像是否存在：
+检查运行时镜像：
 
 ```bash
 sudo docker images | grep -E 'openclaw|ironclaw|opencode'
@@ -641,6 +715,7 @@ sudo docker compose logs lobsterpool
 - 模型名称填错。
 - 服务器无法访问模型服务商。
 - 需要代理但没有配置代理。
+- 模型服务商账号欠费、限流或无权限。
 
 ## 15. 安装完成后的检查清单
 
@@ -650,9 +725,10 @@ sudo docker compose logs lobsterpool
 - [ ] 已创建第一个管理员账号。
 - [ ] `curl -s http://localhost:3000/health` 返回 `{"status":"ok"}`。
 - [ ] `sudo docker compose ps` 没有明显失败的服务。
-- [ ] `/opt/zentrix/.env` 已备份并限制访问权限。
+- [ ] `/opt/lobsterpool/.env` 已备份并限制访问权限。
 - [ ] `LOBSTERPOOL_MASTER_KEY` 已安全备份。
 - [ ] 已确认模型 provider 配置可用。
-- [ ] 已创建并启动一个测试 Agent。
+- [ ] 已创建并启动一个测试智能体。
 - [ ] 如果是公网使用，服务器防火墙或安全组已放行 `80/443`。
 - [ ] 已规划数据库和对象存储的数据备份。
+

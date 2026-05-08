@@ -1,12 +1,12 @@
 ---
 title: 单机生产版安装
 icon: IconAppStore
-description: 面向第一次安装用户的 Zentrix 镜像制品包安装、升级和回滚步骤
+description: 面向第一次安装用户的 ZStack 虾厂 镜像制品包安装、升级和回滚步骤
 ---
 
-# Zentrix 单机生产版安装手册
+# ZStack 虾厂 单机生产版安装手册
 
-这份手册面向第一次安装 Zentrix 的用户。你只需要准备一台 Linux 服务器和一个交付安装包，按步骤执行即可。
+这份手册面向第一次安装 ZStack 虾厂 的用户。你只需要准备一台 Linux 服务器和一个交付安装包，按步骤执行即可。
 
 本文参考离线交付包安装流程整理，适用于：
 
@@ -238,7 +238,7 @@ DB_PASS=请换成一个很强的数据库密码
 
 说明：
 
-- `PUBLIC_URL` 是用户打开 Zentrix 的地址，不要带最后的 `/`。
+- `PUBLIC_URL` 是用户打开 ZStack 虾厂 的地址，不要带最后的 `/`。
 - `DB_PASS` 是数据库密码，请不要使用 `123456`、`password` 这类简单密码。
 
 ### 6.2 推荐填写的路径
@@ -255,7 +255,7 @@ CONTEXT_HOST_PATH=/var/lib/lobsterpool/contexts
 
 | 配置 | 说明 |
 | --- | --- |
-| `INSTALL_DIR` | Zentrix 正式安装目录 |
+| `INSTALL_DIR` | ZStack 虾厂 正式安装目录 |
 | `BACKUP_DIR` | 升级前自动备份目录 |
 | `CONTEXT_HOST_PATH` | 智能体工作空间目录 |
 
@@ -333,7 +333,7 @@ sudo bash install.sh
 4. 逐个导入 `images/*.tar` 镜像。
 5. 复制运行文件到 `/opt/lobsterpool`。
 6. 启动基础服务。
-7. 启动 Zentrix 全部服务。
+7. 启动 ZStack 虾厂 全部服务。
 8. 执行数据库初始化。
 9. 检查一次性初始化容器是否成功。
 10. 检查 `/health`、`/api/v1/version` 和前端页面。

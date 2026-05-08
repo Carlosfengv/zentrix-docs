@@ -1,5 +1,5 @@
 {
-  "title": "Zentrix 使用指南",
+  "title": "ZStack 虾厂 使用指南",
   "pages": [
     "index",
     "---安装部署---",
@@ -9,6 +9,7 @@
     "create-agent",
     "persona-templates",
     "models-and-chat",
+    "file-space",
     "connect-apps",
     "channel-integration",
     "add-skills",

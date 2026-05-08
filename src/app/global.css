@@ -130,13 +130,11 @@ html > body[data-scroll-locked] {
 }
 
 #nd-sidebar a[data-active="true"] {
-  background: color-mix(in oklch, var(--muted) 40%, transparent);
   color: var(--foreground);
   font-weight: 500;
 }
 
 #nd-sidebar a[data-active="true"]:hover {
-  background: color-mix(in oklch, var(--muted) 40%, transparent);
   color: var(--foreground);
 }
 
